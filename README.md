@@ -63,7 +63,7 @@ That would be convenient because it would make the solution independent of langu
 
 ### Benchmarks
 
-Our proof of concept proved our concept! Ceteris paribus, our branch weight information speeds up a simplistic test by a little under 2%. 
+Our proof of concept proved our concept! Ceteris paribus, our branch weight information speeds up a simplistic test by one or two percent. 
 
 In order to isolate the effect of the branch likelihood metadata, I tested the speed of `__builtin_expect_` against an identical function with a different name (so it wouldn't get optimized by the pass).
 The function tested is a pretty trivial example: we perform some arithmetic inside a loop with a fairly predictable conditional.
@@ -88,14 +88,17 @@ It would be more practical but less interesting to test against a control functi
 
 I'm not using Rust's handy benchmarking features because they require linking with the standard library; I'm instead using GNU `time`'s "user time" field. The test's counter is also based on floats because integer types in Rust can `panic` if they over/underflow and `panic`ing requires the standard library. I think you can avoid such runtime checks by compiling in release mode, but that adds in optimizations that might not play nicely with our proof-of-concept pass.
 
-After five randomly interleaved iterations of each test (10,000,000,000 iterations, ~30 seconds each), we see a small but clear gap. 
+After ten randomly interleaved iterations of each test (10,000,000,000 iterations, ~30 seconds each), we see a small but clear gap. 
 
-| Test:     |   1   |   2   |   3   |   4   |   5   |   Avg |
-| --------- |------:|------:|------:|------:|------:|------:|
-| Control   |28.884 |29.032 |29.024 |28.948 |28.784 |28.934 |
-| Builtin   |28.652 |28.276 |28.504 |28.280 |28.568 |28.456 |
+| Test:     |   0   |   1   |   2   |   3   |   4   |   5   |   6   |   7   |   8   |   9   |  Avg  |
+| --------- |------:|------:|------:|------:|------:|------:|------:|------:|------:|------:|------:|
+| Control   |24.076 |24.088 |23.9   |23.788 |23.868 |23.876 |23.906 |23.676 |23.816 |23.688 |23.868 |
+| Builtin   |23.72  |23.736 |23.752 |23.632 |23.564 |23.6   |23.712 |23.684 |23.516 |23.468 |23.638 |
 
-It isn't huge, but there's definitely a difference; the longest time with our pass is 0.5% faster than the slowest time without. 
+It isn't huge, but there's definitely a consistent difference.
+
+![results after 10 iterations][benchmark.png]
+
 
 
 ### Future Work
