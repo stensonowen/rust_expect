@@ -32,23 +32,14 @@ namespace {
         //otherwise return null
         
         //not branching based on a condition
-        if(BI.isUnconditional()) { return NULL; }
-
-        Value *Cond = BI.getCondition();
-        CmpInst *Comp = dyn_cast<CmpInst>(Cond);
-
-        //not branching based on a comparison
-        //comparison should be signed not equal
-        if(Comp == NULL || Comp->getPredicate() != CmpInst::ICMP_NE) { 
+        if(BI.isUnconditional()) { 
             return NULL; 
         }
 
-        //check all operands for call to __builtin_expect
-        CallInst *Call = NULL;
-        for(unsigned int i=0; i<Comp->getNumOperands(); ++i) {
-            if((Call = dyn_cast<CallInst>(Comp->getOperand(i)))) {
-                break;
-            }
+        //condition is not based on a call
+        CallInst *Call = dyn_cast<CallInst>(BI.getCondition());
+        if(Call == NULL) {
+            return NULL;
         }
 
         //check function name contains term "__builtin_expect"
@@ -69,14 +60,19 @@ namespace {
         if(expect == NULL) {
             errs() << "Called using a variable instead of a constant for second arg\n";
             return false;
-        } else if (!expect->isOne() && !expect->isZero()) {
+        } 
+        /*
+         * This would force us to use only bools instead of Rust's fancy generics
+         * Not necessarily sure that's what we want
+        else if (!expect->isOne() && !expect->isZero()) {
             //is this necessary? Will this ever be hit?
             //  Do isZero/isOne already compare truthiness so this is tautologically useless?
             //Is this unnecessarily restrictive?
             //  Does this limit a use case we've already covered, e.g. __builtin_expect(42,42)?
             errs() << "Expected value must be either true or false\n";
             return false;
-        } else {
+        } */
+        else {
             return true;
         }
     }

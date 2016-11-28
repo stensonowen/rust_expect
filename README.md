@@ -53,4 +53,5 @@ To confirm this, my pass no longer works when run on a C++ version of the origin
     br i1 %5, label %6, label %7
 
 ```
-
+Fortunately the changes are pretty straightforward; we just eliminate a comparison (which previously allowed us to branch based on an integer return value) from our pattern check and end up with something easier to follow and harder to fool. However, this means we aren't quite as language-agnostic as we might have been. This is not a big deal and is certainly not a priority; it might be interesting to replace pattern checking itself with traversing a def-use chain to see if a branch conditional depends in any way on a `__builtin_expect_` call. 
+That would be convenient because it would make the solution independent of language or unexpected optimizations or major compiler updates, but it seems like that could quickly get very complex and is outside the scope of this project.
