@@ -1,28 +1,28 @@
-/*
- * How instructions move
- *  Consecutive instructions within each basic block can be swapped 
- *      Normally, all load instructions move up and stores move down
- *      We assume all instructions are of the form load-binop-store
- *      A Load is not moved up if it is preceded by a store 
- *          which shares a source/destination
- *      A Store is not moved down if it is followed by a load
- *          which shares a source/destination
- *      If an instruction is not recognized (e.g. alloca) we don't mess with it
+/* 
+ * Basic language-agnostic PoC implementation of `__builtin_expect` 
+ *  Identifies function by name 
+ *  Adjusts weights for branches which depend on the result of such a function
  *
+ * Most of the work done by an InstVisitor and ModulePass
  */
 
+
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstVisitor.h"
-#include "llvm/IR/Constants.h"
 #include "llvm/IR/MDBuilder.h"
-#include "llvm/Transforms/Utils/BasicBlockUtils.h"
+//#include "llvm/IR/IRBuilder.h"
+//#include "llvm/IR/Constants.h"
+//#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
 using namespace llvm;
 
 namespace {
+    //We might benefit from tweaking these values
+    //These are the defaults used by C's __builtin_expect
     static uint32_t TrueWeight = 2000;
     static uint32_t FalseWeight = 1;
+    //TODO: change back to "__builtin_expect"
+    //  a trailing underscore makes this a bit easier to test w/ C rather than Rust
     static StringRef FnName= "__builtin_expect_";
 
     CallInst *descendedFromLikelyCall(BranchInst &BI) {
@@ -65,12 +65,20 @@ namespace {
         //determine whether programmer used expect call correctly
         //second option must be constant and not variable
         //  and must be zero or one ??
-        if(dyn_cast<ConstantInt>(CI.getArgOperand(1)) == NULL) {
+        ConstantInt *expect = dyn_cast<ConstantInt>(CI.getArgOperand(1));
+        if(expect == NULL) {
             errs() << "Called using a variable instead of a constant for second arg\n";
             return false;
+        } else if (!expect->isOne() && !expect->isZero()) {
+            //is this necessary? Will this ever be hit?
+            //  Do isZero/isOne already compare truthiness so this is tautologically useless?
+            //Is this unnecessarily restrictive?
+            //  Does this limit a use case we've already covered, e.g. __builtin_expect(42,42)?
+            errs() << "Expected value must be either true or false\n";
+            return false;
+        } else {
+            return true;
         }
-
-        return true;
     }
 
     void adjustLikelihood(BranchInst &BI, CallInst &CI) {
@@ -91,13 +99,14 @@ namespace {
             Node = MDB.createBranchWeights(FalseWeight, TrueWeight);
         }
 
-
+        /*
+        //I'm pretty sure this doesn't make sense, and it just mangles the structure
         if(ExpectedValue->isZero()) {
             //ordinarily the "true" option is the default next basic block
             //eliminate a cache miss if it's the other way around
             //is this how LLVM actually works?  maybe.
             BI.swapSuccessors();
-        }
+        }*/
 
         BI.setMetadata(LLVMContext::MD_prof, Node);
 
@@ -107,7 +116,6 @@ namespace {
 
     struct IdentifyBranches: public InstVisitor<IdentifyBranches> {
         void visitBranchInst(BranchInst &BI) {
-            //TODO: BI.swapSuccessors() on __builtin_expect(_,0)
             CallInst *likely_call = descendedFromLikelyCall(BI);
 
             //not the result of a `likely`
@@ -117,16 +125,6 @@ namespace {
 
             adjustLikelihood(BI, *likely_call);
 
-            /*
-            if(likely) {
-                //(likely->getIntrinsicID()==Intrinsic::expect) ??
-                errs() << likely->getName() << " !!\n";
-            } else {
-                errs() << "Branch not from a likely: ";
-                BI.dump();
-            }*/
-            //errs() << "Found a call inst in parent:\n";
-            //Call->dump();
 
         }
     };

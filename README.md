@@ -17,9 +17,11 @@ Moving conditional branches or adjusting their weights requires a handle to all 
 A FunctionPass is probably not suited for these purposes, so instead an InstVisitor is used with a series of checks done in `visitBranchInst()` to determine whether this branch is one of interest. 
 I believe `LowerExpectIntrinsic.cpp` does a similar check for a branch based on a comparison based on a call to a function of interest. 
 (The InstVisitor is performed one module at a time using a ModulePass.)
-In our case (for now) we identify the function by its name (and we have an empty function of that name in the rust project source); this is sloppy and has the potential for ugly errors (Rust mangles function names, so instead of string equality we are checking whether the function name contains certain text), but it will do for our purposes (modifying the Rust core is outside the scope of this project).
+In our case (for now) we identify the function by its name (and we have an empty function of that name in the rust project source); this is sloppy and has the potential for ugly errors (Rust mangles function names\*, so instead of string equality we are checking whether the function name contains certain text), but it will do for our purposes (modifying the Rust core is outside the scope of this project).
 
 The actual information is communicated using an `MDBuilder` with which we `createBranchWeights()`. 
+
+\*: We can use `#[no_mangle]` to avoid function name mangling, but it throws a warning/error for a generic function like the one I'm using. The compiler generates multiple versions with names for each type the function is used with, so the issue depends on our use of `__builtin_expect_`: either we only ever use it with one type and avoid mangling (and suck up the warning) or we can use it with any number of types in the program and permit mangling to prevent a compiler error.
 
 ### Recognizing Relevant Calls
 
