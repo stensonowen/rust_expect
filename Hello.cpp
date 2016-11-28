@@ -1,5 +1,5 @@
 /* 
- * Basic language-agnostic PoC implementation of `__builtin_expect` 
+ * Basic language-agnostic(-ish) PoC implementation of `__builtin_expect` 
  *  Identifies function by name 
  *  Adjusts weights for branches which depend on the result of such a function
  *
@@ -42,10 +42,14 @@ namespace {
             return NULL;
         }
 
-        //check function name contains term "__builtin_expect"
-        //we might be branching because of a different function
-        StringRef fn_name = Call->getCalledFunction()->getName();
-        if(fn_name.find(FnName) == StringRef::npos) {
+        //We must check if the function name *contains* FnName if we allow 
+        //  Rust to mangle function names, which is sometimes necessary
+        //  (e.g. generics)
+        //StringRef fn_name = Call->getCalledFunction()->getName();
+        //if(fn_name.find(FnName) == StringRef::npos) {
+        
+        //check function name is term "__builtin_expect_"
+        if(Call->getCalledFunction()->getName() != FnName) {
             return NULL;
         }
 
@@ -60,19 +64,14 @@ namespace {
         if(expect == NULL) {
             errs() << "Called using a variable instead of a constant for second arg\n";
             return false;
-        } 
-        /*
-         * This would force us to use only bools instead of Rust's fancy generics
-         * Not necessarily sure that's what we want
-        else if (!expect->isOne() && !expect->isZero()) {
-            //is this necessary? Will this ever be hit?
-            //  Do isZero/isOne already compare truthiness so this is tautologically useless?
-            //Is this unnecessarily restrictive?
-            //  Does this limit a use case we've already covered, e.g. __builtin_expect(42,42)?
+        } else if (!expect->isOne() && !expect->isZero()) {
+            /* For now we require the expected value to be a bool
+             * In theory it should be able to be generic though,
+             *  but that adds complexity
+             */
             errs() << "Expected value must be either true or false\n";
             return false;
-        } */
-        else {
+        } else {
             return true;
         }
     }
@@ -81,7 +80,6 @@ namespace {
         //Make sure you call calledCorrectly first
         //otherwise ExpectedValue might be NULL and we could segfault
         ConstantInt *ExpectedValue = dyn_cast<ConstantInt>(CI.getArgOperand(1));
-
 
         //adjust metadata
         MDBuilder MDB(CI.getContext());
@@ -95,33 +93,22 @@ namespace {
             Node = MDB.createBranchWeights(TrueWeight, FalseWeight);
         }
 
-        /*
-        //I'm pretty sure this doesn't make sense, and it just mangles the structure
-        if(ExpectedValue->isZero()) {
-            //ordinarily the "true" option is the default next basic block
-            //eliminate a cache miss if it's the other way around
-            //is this how LLVM actually works?  maybe.
-            BI.swapSuccessors();
-        }*/
-
         BI.setMetadata(LLVMContext::MD_prof, Node);
-
-        errs() << "Changed Something!\n";
-
     }
 
     struct IdentifyBranches: public InstVisitor<IdentifyBranches> {
         void visitBranchInst(BranchInst &BI) {
+            //decide whether this is an important Branch
             CallInst *likely_call = descendedFromLikelyCall(BI);
 
-            //not the result of a `likely`
+            //it's not the result of a `__builtin_expect`
             if(likely_call == NULL) { return; }
-            //called function incorrectly
+            //user called function incorrectly
             if(calledCorrectly(*likely_call) == false) { return; }
 
+            //change branch weight metadata
             adjustLikelihood(BI, *likely_call);
-
-
+            errs() << "Changed Something!\n";
         }
     };
     
@@ -130,6 +117,7 @@ namespace {
         Hello() : ModulePass(ID) {}
 
         bool runOnModule(Module &M) {
+            //Run BranchInst visitor against all the branches in each module
             IdentifyBranches IB;
             IB.visit(M);
             return true;
