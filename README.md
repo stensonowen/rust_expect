@@ -100,7 +100,6 @@ It isn't huge, but there's definitely a consistent difference.
 ![results after 10 iterations][/benchmark.png]
 
 
-
 ### Future Work
 
 There is plenty that can be done to transform this demo from a proof-of-concept into something that is actually useful. 
