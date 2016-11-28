@@ -8,9 +8,10 @@
 #[lang = "eh_personality"] extern fn eh_personality() {}
 #[lang = "panic_fmt"] fn panic_fmt() -> ! { loop {} }
 
-#[no_mangle]
-// generics apparently require mangling
-//	we can mangle a generic function or no_mangle a (bool,bool)
+//#[no_mangle]
+// generics require mangling because compilation generates all used forms
+// if we mangle, we get a warning and can only use the function w/ one type for T	
+// if we no_mangle, we have to search for function names containing (not equalling) a string
 #[inline]
 pub fn __builtin_expect_<T: Eq>(expr: T, expect: T) -> bool {
 	expr == expect
