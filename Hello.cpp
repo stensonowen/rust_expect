@@ -88,9 +88,9 @@ namespace {
         // If expect value is equal to 1 it means that we are more likely to take
         // branch 0, in other case more likely is branch 1.
         if (ExpectedValue->isOne()) {
-            Node = MDB.createBranchWeights(FalseWeight, TrueWeight);
-        } else {
             Node = MDB.createBranchWeights(TrueWeight, FalseWeight);
+        } else {
+            Node = MDB.createBranchWeights(FalseWeight, TrueWeight);
         }
 
         BI.setMetadata(LLVMContext::MD_prof, Node);
