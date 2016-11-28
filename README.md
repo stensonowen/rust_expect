@@ -3,13 +3,13 @@
 
 ### Description:
 
-We should be able to improve branch prediction in Rust using optional user input for conditionals like `__builtin_expect` in gcc. This LLVM pass uses two strategies to accomplish this. 
+We should be able to improve branch prediction in Rust using optional syntax for conditionals like `__builtin_expect` in gcc. 
 
-1. ~~We adjust which branch immediately follows a conditional (the other requires a `jmp` (or similar) instruction. Assuming the user's calls to `__builtin_expect` are done intelligently (which we are assuming), this should eliminate a branch (and thus an instruction cache miss) in the common case. This assumes that the structure of the LLVM IR we output is actually reflected by the final binary, which could be false if later passes adjust these branches or the layout of the program.~~
+LLVM optimizations can take advantage of branches with different likelihoods, such as be placing a basic block immediately after another it is expected to follow, often reducing an instruction cache miss. 
+We adjust branch weight metadata based on the expected truth or falsity provided as input to our function.
+This is how `LowerExpectIntrinsic.cpp` handles similar situations with C/C++. This strategy relies on the assumption that LLVM actually uses branch weight metadata and that other passes do not provide their own weight predictions that outweigh ours.
 
-2. We adjust branch weight metadata based on the expected truth or falsity of the conditional. This is how `LowerExpectIntrinsic.cpp` handles similar situations with C/C++. This relies on the assumption that LLVM actually uses branch weight metadata and that other passes do not provide their own weight predictions that outweigh ours.
-
-Because it is hard to be certain about the validity of our assumptions, this project should be considered as a proof-of-concept rather than a practical implementation. 
+In an effort to focus on LLVM and not get sidetracked or stuck down a rabbit hole, this project should be considered as a proof-of-concept rather than a practical implementation. 
 
 ### Design
 
@@ -97,8 +97,9 @@ It isn't huge, but there's definitely a difference; the longest time with our pa
 
 There is plenty that can be done to transform this demo from a proof-of-concept into something that is actually useful. 
 
+* Adding generic comparisons rather than just booleans
+
 * Incorporating `__builtin_expect` into the Rust core instead of just searching for a function by name
 
 * Adding custom branch weights for `match` statements
 
-* Adding generic comparisons rather than just booleans
