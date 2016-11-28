@@ -55,3 +55,50 @@ To confirm this, my pass no longer works when run on a C++ version of the origin
 ```
 Fortunately the changes are pretty straightforward; we just eliminate a comparison (which previously allowed us to branch based on an integer return value) from our pattern check and end up with something easier to follow and harder to fool. However, this means we aren't quite as language-agnostic as we might have been. This is not a big deal and is certainly not a priority; it might be interesting to replace pattern checking itself with traversing a def-use chain to see if a branch conditional depends in any way on a `__builtin_expect_` call. 
 That would be convenient because it would make the solution independent of language or unexpected optimizations or major compiler updates, but it seems like that could quickly get very complex and is outside the scope of this project.
+
+### Benchmarks
+
+Our proof of concept proved the concept! Ceteris paribus, our branch weight information speeds up a simplistic test by a little under 2%. 
+
+In order to isolate the effect of the branch likelihood metadata, I tested the speed of `__builtin_expect_` against an identical function with a different name (so it wouldn't get optimized by the pass).
+The function tested is a pretty trivial example: we perform some arithmetic inside a loop with a fairly predictable conditional.
+```Rust
+fn builtin_test(mut y: f64) -> f64 {
+    let mut count: f64 = 0.0;
+    while count < ITERS {
+        count += 1.0;
+        if __builtin_expect_(count > 5.0,true) {
+        //the control calls an identical function 
+        // with only a different name
+            y += 1.0;
+        } else {
+            y += 2.0;
+        }
+    }
+    y
+}
+```
+
+It would be more practical but less interesting to test against a control function without an added function because the performance comparison would depend on our example. This just serves as a demo that there is some possible speedup.
+
+I'm not using Rust's handy benchmarking features because they require linking with the standard library; I'm instead using GNU Time's `user` time field. The test's counter is also based on floats because integer types in Rust can `panic` if they over/underflow and `panic`ing requires the standard library. I think you can avoid such runtime checks by compiling in release mode, but that adds in optimizations that might not play nicely with our proof-of-concept pass.
+
+After five randomly interleaved iterations of each test (10,000,000,000 iterations, ~30 seconds), we see a small but clear gap. 
+
+| Test:     |   1   |   2   |   3   |   4   |   5   |   Avg |
+| --------- |------:|------:|------:|------:|------:|------:|
+| Control   |28.884 |29.032 |29.024 |28.948 |28.784 |28.934 |
+| Builtin   |28.652 |28.276 |28.504 |28.280 |28.568 |28.456 |
+
+It isn't huge, but there's definitely a difference; the longest time with our pass is 0.5% faster than the slowest time without. 
+
+
+### Future Work
+
+There is plenty that can be done to transform this demo from a proof-of-concept into something that is actually useful. 
+
+* Incorporating `__builtin_expect` into the Rust core instead of just searching for a function by name
+
+* Adding custom branch weights for `match` statements
+
+* Adding generic comparisons rather than just booleans
