@@ -97,7 +97,7 @@ After ten randomly interleaved iterations of each test (10,000,000,000 iteration
 
 It isn't huge, but there's definitely a consistent difference.
 
-![results after 10 iterations][/benchmark.png]
+![benchmarks][https://i.imgur.com/oqm40bN.png]
 
 
 ### Future Work
