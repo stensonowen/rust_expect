@@ -5,33 +5,37 @@
 
 We should be able to improve branch prediction in Rust using optional syntax for conditionals like `__builtin_expect` in gcc. 
 
-LLVM optimizations can take advantage of branches with different likelihoods, such as be placing a basic block immediately after another it is expected to follow, often reducing an instruction cache miss. 
-We adjust branch weight metadata based on the expected truth or falsity provided as input to our function.
-This is how `LowerExpectIntrinsic.cpp` handles similar situations with C/C++. This strategy relies on the assumption that LLVM actually uses branch weight metadata and that other passes do not provide their own weight predictions that outweigh ours.
+LLVM optimizations can take advantage of branches with different likelihoods, such as by placing a basic block immediately after another it is expected to follow, which can often reduce an instruction cache miss. 
+We adjust branch weight metadata based on the expected outcome provided as input to our function.
+This is how `LowerExpectIntrinsic.cpp` handles similar situations with C/C++. This strategy relies on the assumption that LLVM actually uses branch weight metadata and that other passes do not provide their own weight predictions that overshadow ours.
 
-In an effort to focus on LLVM and not get sidetracked or stuck down a rabbit hole, this project should be considered as a proof-of-concept rather than a practical implementation. 
+In an effort to focus on LLVM and not get sidetracked or stuck down a nearby rabbit hole, this project aims to be a proof-of-concept rather than a practical implementation. 
 
 ### Design
 
-Moving conditional branches or adjusting their weights requires a handle to all conditionals which rely (directly, for purposes of simplification) on the result of a call to `__builtin_expect`. 
-A FunctionPass is probably not suited for these purposes, so instead an InstVisitor is used with a series of checks done in `visitBranchInst()` to determine whether this branch is one of interest. 
-I believe `LowerExpectIntrinsic.cpp` does a similar check for a branch based on a comparison based on a call to a function of interest. 
-(The InstVisitor is performed one module at a time using a ModulePass.)
+Moving conditional branches or adjusting their weights requires a handle to all conditionals which rely (directly, for our purposes) on the result of a call to `__builtin_expect_`. 
+We can use an InstVisitor (called via a ModulePass) with a series of checks in `visitBranchInst()` to identify all the branches of interest.
+I believe `LowerExpectIntrinsic.cpp` similarly looks for a branch dependent on a comparison of the result of a call to a function of interest. 
 In our case (for now) we identify the function by its name (and we have an empty function of that name in the rust project source); this is sloppy and has the potential for ugly errors (Rust mangles function names\*, so instead of string equality we are checking whether the function name contains certain text), but it will do for our purposes (modifying the Rust core is outside the scope of this project).
 
-The actual information is communicated using an `MDBuilder` with which we `createBranchWeights()`. 
+This solution is supposed to be somewhat language-agnostic, as all it is really doing is recognizing a function by name and the pattern of LLVM it generates. (As I below, though, the language must have a distinct boolean type.) For this reason the function name the pass looks for is `__builtin_expect_` (with a trailing underscore), so that it will apply this pass and not `__builtin_expect` when testing on C++ code.
 
-\*: We can use `#[no_mangle]` to avoid function name mangling, but it throws a warning/error for a generic function like the one I'm using. The compiler generates multiple versions with names for each type the function is used with, so the issue depends on our use of `__builtin_expect_`: either we only ever use it with one type and avoid mangling (and suck up the warning) or we can use it with any number of types in the program and permit mangling to prevent a compiler error.
+Once we've identified likely branches, the actual information is communicated using an `MDBuilder` with which we `createBranchWeights()`. 
+
+\*: We can use `#[no_mangle]` to avoid function name mangling, ~~but it throws a warning/error for a generic function like the one I'm using~~. The compiler generates multiple versions with names for each type the function is used with, so the issue depends on our use of `__builtin_expect_`: either we only ever use it with one type and avoid mangling (and suck up the warning) or we can use it with any number of types in the program and permit mangling to prevent a compiler error.
+
+The downside to mangling function names is that we use the function name to identify when to apply our optimization; mangling requires we check to see whether the bitcode function name contains the source function name, whereas without mangling (or generics) we can just check if they're equal, lessening the risk of shenanigans.
+(I'm leaving this note because it's an interesting challenge, though for now it's irrelevant because I'm no longer using a generic `__builtin_expect_`.)
+
 
 ### Recognizing Relevant Calls
 
-Determining which branches we were interested turned out to be slightly more interesting than expected. While first writing and testing the pass I used a basic C function to recognize by name:
+Determining which branches were relevant turned out to be slightly more interesting than expected. While first writing and testing the pass I used a basic C function to recognize by name (because the IR generated by Rust could be a bit more convoluted):
 ```C
-    int __builtin_expect_(int actual, int expect) {
-        return actual == expect;
-    }
+int __builtin_expect_(int actual, int expect) {
+    return actual == expect;
+}
 ```
-
 This produced LLVM IR with the following pattern:
 ```LLVM
     %5 = call i32 @__builtin_expect_(i32 %4, i32 1)
@@ -47,18 +51,19 @@ start:                                            ; preds = %entry-block
 bb1:                                              ; preds = %start
     br i1 %2, label %bb2, label %bb3
 ```
-To confirm this, my pass no longer works when run on a C++ version of the original C file but with a return value of `bool` instead of `int` (which is understandable from the IR).
+To confirm this, my pass stopped working when run on a C++ version of the original C file but with a return value of `bool` instead of `int` (which is understandable from the IR).
 ```LLVM
     %5 = call zeroext i1 @_Z17__builtin_expect_ii(i32 %4, i32 1)
     br i1 %5, label %6, label %7
 
 ```
-Fortunately the changes are pretty straightforward; we just eliminate a comparison (which previously allowed us to branch based on an integer return value) from our pattern check and end up with something easier to follow and harder to fool. However, this means we aren't quite as language-agnostic as we might have been. This is not a big deal and is certainly not a priority; it might be interesting to replace pattern checking itself with traversing a def-use chain to see if a branch conditional depends in any way on a `__builtin_expect_` call. 
+Fortunately the changes are pretty straightforward; we just eliminate a comparison (which previously allowed us to branch based on an integer return value) from our pattern check and end up with something easier to follow and harder to fool. However, this means we aren't quite as language-agnostic as we might have been. This is not a big deal and is certainly not a priority. 
+It might be interesting to replace pattern checking itself with traversing a def-use chain to see if a branch conditional depends in any way on a `__builtin_expect_` call. 
 That would be convenient because it would make the solution independent of language or unexpected optimizations or major compiler updates, but it seems like that could quickly get very complex and is outside the scope of this project.
 
 ### Benchmarks
 
-Our proof of concept proved the concept! Ceteris paribus, our branch weight information speeds up a simplistic test by a little under 2%. 
+Our proof of concept proved our concept! Ceteris paribus, our branch weight information speeds up a simplistic test by a little under 2%. 
 
 In order to isolate the effect of the branch likelihood metadata, I tested the speed of `__builtin_expect_` against an identical function with a different name (so it wouldn't get optimized by the pass).
 The function tested is a pretty trivial example: we perform some arithmetic inside a loop with a fairly predictable conditional.
@@ -81,9 +86,9 @@ fn builtin_test(mut y: f64) -> f64 {
 
 It would be more practical but less interesting to test against a control function without an added function because the performance comparison would depend on our example. This just serves as a demo that there is some possible speedup.
 
-I'm not using Rust's handy benchmarking features because they require linking with the standard library; I'm instead using GNU Time's `user` time field. The test's counter is also based on floats because integer types in Rust can `panic` if they over/underflow and `panic`ing requires the standard library. I think you can avoid such runtime checks by compiling in release mode, but that adds in optimizations that might not play nicely with our proof-of-concept pass.
+I'm not using Rust's handy benchmarking features because they require linking with the standard library; I'm instead using GNU `time`'s "user time" field. The test's counter is also based on floats because integer types in Rust can `panic` if they over/underflow and `panic`ing requires the standard library. I think you can avoid such runtime checks by compiling in release mode, but that adds in optimizations that might not play nicely with our proof-of-concept pass.
 
-After five randomly interleaved iterations of each test (10,000,000,000 iterations, ~30 seconds), we see a small but clear gap. 
+After five randomly interleaved iterations of each test (10,000,000,000 iterations, ~30 seconds each), we see a small but clear gap. 
 
 | Test:     |   1   |   2   |   3   |   4   |   5   |   Avg |
 | --------- |------:|------:|------:|------:|------:|------:|
