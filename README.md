@@ -13,6 +13,42 @@ Because it is hard to be certain about the validity of our assumptions, this pro
 
 ### Design
 
-Moving conditional branches or adjusting their weights requires a handle to all conditionals which rely (directly, for purposes of simplification) on the result of a call to `__builtin_expect`. A FunctionPass is probably not suited for these purposes, so instead an InstVisitor is used with a series of checks done in `visitBranchInst()` to determine whether this branch is one of interest. I believe `LowerExpectIntrinsic.cpp` does a similar check for a branch based on a comparison based on a call to a function of interest. In our case (for now) we identify the function by its name (and we have an empty function of that name in the rust project source); this is sloppy and has the potential for ugly errors (Rust mangles function names, so instead of string equality we are checking whether the function name contains certain text), but it will do for our purposes (modifying the Rust core is outside the scope of this project).
+Moving conditional branches or adjusting their weights requires a handle to all conditionals which rely (directly, for purposes of simplification) on the result of a call to `__builtin_expect`. 
+A FunctionPass is probably not suited for these purposes, so instead an InstVisitor is used with a series of checks done in `visitBranchInst()` to determine whether this branch is one of interest. 
+I believe `LowerExpectIntrinsic.cpp` does a similar check for a branch based on a comparison based on a call to a function of interest. 
+(The InstVisitor is performed one module at a time using a ModulePass.)
+In our case (for now) we identify the function by its name (and we have an empty function of that name in the rust project source); this is sloppy and has the potential for ugly errors (Rust mangles function names, so instead of string equality we are checking whether the function name contains certain text), but it will do for our purposes (modifying the Rust core is outside the scope of this project).
 
 The actual information is communicated using an `MDBuilder` with which we `createBranchWeights()`. 
+
+### Recognizing Relevant Calls
+
+Determining which branches we were interested turned out to be slightly more interesting than expected. While first writing and testing the pass I used a basic C function to recognize by name:
+```
+    int __builtin_expect_(int actual, int expect) {
+        return actual == expect;
+    }
+```
+
+This produced LLVM IR with the following pattern:
+```
+    %5 = call i32 @__builtin_expect_(i32 %4, i32 1)
+    %6 = icmp ne i32 %5, 0
+    br i1 %6, label %7, label %8
+```
+This is the pattern I originally matched, and it is the pattern which `LowerExpectIntrinsic.cpp` matches. However, this was problematic when applying it to Rust, because my Rust version returns a boolean instead of an integer that should be either 0 or 1. So the IR changed.
+```
+start:                                            ; preds = %entry-block
+    %2 = call zeroext i1 @_ZN4test17__builtin_expect_17h8530ac139335dd58E(i32 %0, i32 2)
+    br label %bb1
+
+bb1:                                              ; preds = %start
+    br i1 %2, label %bb2, label %bb3
+```
+To confirm this, my pass no longer works when run on a C++ version of the original C file but with a return value of `bool` instead of `int` (which is understandable from the IR).
+```
+    %5 = call zeroext i1 @_Z17__builtin_expect_ii(i32 %4, i32 1)
+    br i1 %5, label %6, label %7
+
+```
+
